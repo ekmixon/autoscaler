@@ -51,39 +51,43 @@ InstanceInfo = collections.namedtuple("InstanceInfo", 'name ip')
 
 
 def get_instances(master, ng):
-    '''Poll instances list and parse result to list of InstanceInfo structs'''
-    raw = subprocess.check_output(['gcloud', 'compute', 'instances', 'list'])
-    first = True
-    result = []
-    for l in raw.splitlines():
-        if first:
-            first = False
-            continue
-        parts = l.split()
-        name = parts[0]
-        if not name.startswith(ng):
-            continue
-        ips = []
-        for p in parts[1:]:
-          if re.match('([0-9]{1,3}\.){3}[0-9]{1,3}', p):
-              ips.append(p)
-        # XXX: A VM has showed up, but it doesn't have internal and external ip
-        # yet, let's just pretend we haven't seen it yet
-        if len(ips) < 2:
-              continue
-        info = InstanceInfo(name, ips)
-        result.append(info)
-    return result
+  '''Poll instances list and parse result to list of InstanceInfo structs'''
+  raw = subprocess.check_output(['gcloud', 'compute', 'instances', 'list'])
+  first = True
+  result = []
+  for l in raw.splitlines():
+    if first:
+        first = False
+        continue
+    parts = l.split()
+    name = parts[0]
+    if not name.startswith(ng):
+        continue
+    ips = [p for p in parts[1:] if re.match('([0-9]{1,3}\.){3}[0-9]{1,3}', p)]
+    # XXX: A VM has showed up, but it doesn't have internal and external ip
+    # yet, let's just pretend we haven't seen it yet
+    if len(ips) < 2:
+          continue
+    info = InstanceInfo(name, ips)
+    result.append(info)
+  return result
 
 
 def break_node(master, instance, broken_ips, verbose):
-    '''Add iptable rules to drop packets coming from ips used by a give node'''
-    print('Breaking node {}'.format(instance.name))
-    for ip in instance.ip:
-        if verbose:
-            print('Blocking ip {} on master'.format(ip))
-        subprocess.call(['gcloud', 'compute', 'ssh', master, '--', 'sudo iptables -I INPUT 1 -p tcp -s {} -j DROP'.format(ip)])
-        broken_ips.add(ip)
+  '''Add iptable rules to drop packets coming from ips used by a give node'''
+  print(f'Breaking node {instance.name}')
+  for ip in instance.ip:
+    if verbose:
+      print(f'Blocking ip {ip} on master')
+    subprocess.call([
+        'gcloud',
+        'compute',
+        'ssh',
+        master,
+        '--',
+        f'sudo iptables -I INPUT 1 -p tcp -s {ip} -j DROP',
+    ])
+    broken_ips.add(ip)
 
 
 def run(master, ng, existing, upcoming, max_nodes_to_break, broken_ips, verbose):
@@ -125,16 +129,16 @@ def run(master, ng, existing, upcoming, max_nodes_to_break, broken_ips, verbose)
 
 
 def clean_up(master, broken, verbose):
-    '''
+  '''
     Clean up iptable rules created by this script.
 
     WARNING: this just deletes top N rules if you've added some rules to the
     top of INPUT chain while this was running you will suffer.
     '''
-    if verbose:
-        print('Cleaning up top {} iptable rules'.format(len(broken)))
-    for i in range(len(broken)):
-        subprocess.call(['gcloud', 'compute', 'ssh', master, '--', 'sudo iptables -D INPUT 1'])
+  if verbose:
+    print(f'Cleaning up top {len(broken)} iptable rules')
+  for _ in range(len(broken)):
+    subprocess.call(['gcloud', 'compute', 'ssh', master, '--', 'sudo iptables -D INPUT 1'])
 
 
 def main():
